@@ -1,0 +1,17 @@
+
+> bolt-expo-starter@1.0.0 dev
+> cross-env EXPO_NO_TELEMETRY=1 expo start
+
+Starting project at C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera
+PluginError: Failed to resolve plugin for module "expo-task-manager" relative to "C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera". Do you have node modules installed?
+PluginError: Failed to resolve plugin for module "expo-task-manager" relative to "C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera". Do you have node modules installed?
+    at resolvePluginForModule (C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera\node_modules\@expo\config-plugins\build\utils\plugin-resolver.js:96:9)
+    at resolveConfigPluginFunctionWithInfo (C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera\node_modules\@expo\config-plugins\build\utils\plugin-resolver.js:145:7)
+    at resolveConfigPluginFunction (C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera\node_modules\@expo\config-plugins\build\utils\plugin-resolver.js:136:7)
+    at withStaticPlugin (C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera\node_modules\@expo\config-plugins\build\plugins\withStaticPlugin.js:85:70)
+    at C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera\node_modules\@expo\config-plugins\build\plugins\withPlugins.js:30:84
+    at Array.reduce (<anonymous>)
+    at withPlugins (C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera\node_modules\@expo\config-plugins\build\plugins\withPlugins.js:30:18)
+    at withConfigPlugins (C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera\node_modules\@expo\config\build\plugins\withConfigPlugins.js:35:47)
+    at fillAndReturnConfig (C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera\node_modules\@expo\config\build\Config.js:236:78)
+    at getConfig (C:\Users\vasus\OneDrive\Desktop\Apps\Bg Camera\node_modules\@expo\config\build\Config.js:289:12)

@@ -1,0 +1,4 @@
+{"level":"info","message":"Connected to MongoDB","service":"surveillance-api","timestamp":"2026-02-13 23:51:18"}
+{"level":"info","message":"Surveillance API server running on port 3000","service":"surveillance-api","timestamp":"2026-02-13 23:51:18"}
+{"level":"info","message":"Environment: development","service":"surveillance-api","timestamp":"2026-02-13 23:51:18"}
+{"level":"info","message":"MongoDB: mongodb+srv://vasusharma1768934:Tranquility123@cluster0.yncjyl1.mongodb.net/?appName=Cluster0","service":"surveillance-api","timestamp":"2026-02-13 23:51:18"}
