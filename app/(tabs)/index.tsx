@@ -237,7 +237,19 @@ export default function RecordingScreen() {
       setIsRecording(false);
 
       if (useNativeAndroidRecorder) {
-        const nativePath = await CameraXNativeService.stopRecording();
+        let nativePath: string | null = null;
+        try {
+          nativePath = await CameraXNativeService.stopRecording();
+        } catch (nativeStopError) {
+          console.warn('Native stop failed, checking latest native status:', nativeStopError);
+          const status = await CameraXNativeService.getStatus();
+          nativePath = status.latestOutputPath || null;
+        }
+
+        if (!nativePath) {
+          throw new Error('Native recorder stopped but no output path was returned');
+        }
+
         await handleNativeRecordingComplete(nativePath);
       } else {
         await CameraService.stopRecording();
@@ -287,7 +299,12 @@ export default function RecordingScreen() {
         mediaPermission = await MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']);
       }
       if (mediaPermission.granted) {
-        await MediaLibrary.createAssetAsync(destinationPath);
+        const asset = await MediaLibrary.createAssetAsync(destinationPath);
+        try {
+          await MediaLibrary.createAlbumAsync('Bg Camera', asset, false);
+        } catch {
+          // Album exists; ignore.
+        }
       }
     } catch (e) {
       console.warn('Gallery save failed for native recording:', e);
