@@ -21,6 +21,7 @@ import { SettingsService } from '@/src/services/SettingsService';
 import { useAppState } from '@/src/hooks/useAppState';
 import { CameraControls } from '@/src/components/CameraControls';
 import { RecordingIndicator } from '@/src/components/RecordingIndicator';
+import { RECORDINGS_DIR } from '@/src/constants/paths';
 
 export default function RecordingScreen() {
   const [facing, setFacing] = useState<CameraType>('back');
@@ -85,7 +86,7 @@ export default function RecordingScreen() {
 
   // ---------- APP STATE ----------
   useEffect(() => {
-    if (Platform.OS !== 'android' || !isRecording) return;
+    if (Platform.OS !== 'android' || !isRecording || useNativeAndroidRecorder) return;
 
     if (appState === 'background') {
       BackgroundService.startForegroundService({
@@ -103,7 +104,7 @@ export default function RecordingScreen() {
   }, [appState, isRecording]);
 
   useEffect(() => {
-    if (Platform.OS !== 'android') {
+    if (Platform.OS !== 'android' || useNativeAndroidRecorder) {
       return;
     }
 
@@ -253,21 +254,40 @@ export default function RecordingScreen() {
   };
 
   const handleNativeRecordingComplete = async (nativePath: string) => {
-    const normalizedPath = nativePath.startsWith('file://')
+    const sourcePath = nativePath.startsWith('file://')
       ? nativePath
       : `file://${nativePath.replace(/\\/g, '/')}`;
 
-    const fileInfo = await FileSystem.getInfoAsync(normalizedPath);
-    if (!fileInfo.exists || typeof (fileInfo as any).size !== 'number') {
+    const sourceInfo = await FileSystem.getInfoAsync(sourcePath);
+    if (!sourceInfo.exists || typeof (sourceInfo as any).size !== 'number') {
       throw new Error('Native recording output file not found');
     }
 
-    setLastChunkPath(normalizedPath);
+    await FileSystem.makeDirectoryAsync(RECORDINGS_DIR, { intermediates: true });
+    const fileName = sourcePath.split('/').pop() || `rec_native_${Date.now()}.mp4`;
+    const destinationPath = `${RECORDINGS_DIR}${fileName}`;
+
+    if (sourcePath !== destinationPath) {
+      await FileSystem.copyAsync({
+        from: sourcePath,
+        to: destinationPath,
+      });
+    }
+
+    const destinationInfo = await FileSystem.getInfoAsync(destinationPath);
+    if (!destinationInfo.exists || typeof (destinationInfo as any).size !== 'number') {
+      throw new Error('Failed to persist native recording to app storage');
+    }
+
+    setLastChunkPath(destinationPath);
 
     try {
-      const mediaPermission = await MediaLibrary.getPermissionsAsync();
+      let mediaPermission = await MediaLibrary.getPermissionsAsync();
+      if (!mediaPermission.granted) {
+        mediaPermission = await MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']);
+      }
       if (mediaPermission.granted) {
-        await MediaLibrary.createAssetAsync(normalizedPath);
+        await MediaLibrary.createAssetAsync(destinationPath);
       }
     } catch (e) {
       console.warn('Gallery save failed for native recording:', e);
@@ -275,15 +295,16 @@ export default function RecordingScreen() {
 
     const duration = Date.now() - recordingStartMsRef.current;
     await UploadService.addToQueue({
-      path: normalizedPath,
+      path: destinationPath,
       duration: Math.max(duration, 0),
-      size: (fileInfo as any).size || 0,
+      size: (destinationInfo as any).size || 0,
       timestamp: Date.now(),
       chunkIndex: 0,
     });
   };
 
   const toggleCameraFacing = () => {
+    if (useNativeAndroidRecorder) return;
     if (isRecording) return;
     setFacing((prev) => (prev === 'back' ? 'front' : 'back'));
   };
@@ -297,7 +318,7 @@ export default function RecordingScreen() {
         isBackgroundReady={isBackgroundReady}
       />
 
-      {!useNativeAndroidRecorder || !isRecording ? (
+      {!useNativeAndroidRecorder ? (
         <CameraView
           ref={cameraRef}
           style={styles.camera}
@@ -306,7 +327,9 @@ export default function RecordingScreen() {
         />
       ) : (
         <View style={styles.cameraPlaceholder}>
-          <Text style={styles.cameraPlaceholderText}>CameraX background recorder active</Text>
+          <Text style={styles.cameraPlaceholderText}>
+            {isRecording ? 'CameraX background recorder active' : 'CameraX recorder ready'}
+          </Text>
         </View>
       )}
 
@@ -333,6 +356,15 @@ export default function RecordingScreen() {
           <Ionicons name="warning" size={16} color="#FF9500" />
           <Text style={styles.androidWarningText}>
             Expo Go runtime: background recording is not guaranteed
+          </Text>
+        </View>
+      )}
+
+      {Platform.OS === 'android' && !useNativeAndroidRecorder && (
+        <View style={styles.androidNativeWarning}>
+          <Ionicons name="alert-circle" size={16} color="#FF3B30" />
+          <Text style={styles.androidNativeWarningText}>
+            Native CameraX module not loaded. Rebuild and reinstall the Android app.
           </Text>
         </View>
       )}
@@ -388,6 +420,18 @@ const styles = StyleSheet.create({
   },
   androidWarningText: {
     color: '#FF9500',
+    fontSize: 12,
+    marginLeft: 6,
+  },
+  androidNativeWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255,59,48,0.12)',
+  },
+  androidNativeWarningText: {
+    color: '#FF3B30',
     fontSize: 12,
     marginLeft: 6,
   },
