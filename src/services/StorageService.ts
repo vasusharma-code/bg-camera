@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
 import { SettingsService } from './SettingsService';
+import { RECORDINGS_DIR } from '@/src/constants/paths';
 
 export interface StorageInfo {
   totalSize: number;
@@ -19,12 +20,12 @@ export interface FileInfo {
 }
 
 class StorageServiceClass {
-  private readonly SURVEILLANCE_DIR = `${FileSystem.documentDirectory}surveillance_chunks/`;
+  private readonly RECORDINGS_DIR = RECORDINGS_DIR;
 
   async initialize(): Promise<void> {
     try {
       // Ensure surveillance directory exists
-      await FileSystem.makeDirectoryAsync(this.SURVEILLANCE_DIR, {
+      await FileSystem.makeDirectoryAsync(this.RECORDINGS_DIR, {
         intermediates: true,
       });
       
@@ -73,16 +74,16 @@ class StorageServiceClass {
 
   async getLocalFiles(): Promise<FileInfo[]> {
     try {
-      const dirInfo = await FileSystem.getInfoAsync(this.SURVEILLANCE_DIR);
+      const dirInfo = await FileSystem.getInfoAsync(this.RECORDINGS_DIR);
       if (!dirInfo.exists || !dirInfo.isDirectory) {
         return [];
       }
 
-      const fileNames = await FileSystem.readDirectoryAsync(this.SURVEILLANCE_DIR);
+      const fileNames = await FileSystem.readDirectoryAsync(this.RECORDINGS_DIR);
       const files: FileInfo[] = [];
 
       for (const fileName of fileNames) {
-        const filePath = `${this.SURVEILLANCE_DIR}${fileName}`;
+        const filePath = `${this.RECORDINGS_DIR}${fileName}`;
         const fileInfo = await FileSystem.getInfoAsync(filePath);
         
         if (fileInfo.exists && !fileInfo.isDirectory) {

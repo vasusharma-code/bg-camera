@@ -6,6 +6,7 @@ import {
   ScrollView,
   Switch,
   Alert,
+  AlertButton,
   TouchableOpacity,
   Platform,
 } from 'react-native';
@@ -128,17 +129,19 @@ export default function SettingsScreen() {
       { label: 'Medium (720p)', value: '720p' },
       { label: 'High (1080p)', value: '1080p' },
     ];
+    const buttons: AlertButton[] = qualities.map((quality) => ({
+      text: quality.label,
+      onPress: () => {
+        void updateSetting('videoQuality', quality.value as any);
+      },
+      style: settings.videoQuality === quality.value ? 'default' : undefined,
+    }));
+    buttons.push({ text: 'Cancel', style: 'cancel' });
 
     Alert.alert(
       'Video Quality',
       'Choose recording quality',
-      qualities.map(quality => ({
-        text: quality.label,
-        onPress: () => updateSetting('videoQuality', quality.value as any),
-        style: settings.videoQuality === quality.value ? 'default' : undefined,
-      })).concat([
-        { text: 'Cancel', style: 'cancel' }
-      ])
+      buttons
     );
   };
 
@@ -151,17 +154,19 @@ export default function SettingsScreen() {
       { label: '10 minutes', value: 10 },
       { label: '15 minutes', value: 15 },
     ];
+    const buttons: AlertButton[] = durations.map((duration) => ({
+      text: duration.label,
+      onPress: () => {
+        void updateSetting('chunkDurationMinutes', duration.value);
+      },
+      style: settings.chunkDurationMinutes === duration.value ? 'default' : undefined,
+    }));
+    buttons.push({ text: 'Cancel', style: 'cancel' });
 
     Alert.alert(
       'Chunk Duration',
       'Length of each video segment',
-      durations.map(duration => ({
-        text: duration.label,
-        onPress: () => updateSetting('chunkDurationMinutes', duration.value),
-        style: settings.chunkDurationMinutes === duration.value ? 'default' : undefined,
-      })).concat([
-        { text: 'Cancel', style: 'cancel' }
-      ])
+      buttons
     );
   };
 

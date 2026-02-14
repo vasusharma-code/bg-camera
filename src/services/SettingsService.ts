@@ -31,7 +31,7 @@ class SettingsServiceClass {
     chunkDurationMinutes: 5,
     autoRestart: true,
     wifiOnlyUpload: false,
-    deleteAfterUpload: true,
+    deleteAfterUpload: false,
     maxRetryAttempts: 3,
     backgroundNotifications: true,
     maxLocalStorageGB: 2,

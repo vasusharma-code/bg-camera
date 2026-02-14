@@ -31,7 +31,7 @@ export interface ForegroundServiceConfig {
 }
 
 class BackgroundServiceClass {
-  private backgroundTaskId: string | null = null;
+  private backgroundTasksRegistered = false;
   private foregroundServiceActive = false;
   private notificationId = 'surveillance-recording';
 
@@ -93,16 +93,21 @@ class BackgroundServiceClass {
 
   async registerBackgroundTasks(): Promise<void> {
     try {
-      // Register background fetch task
-      await BackgroundFetch.registerTaskAsync(BACKGROUND_UPLOAD_TASK, {
-        minimumInterval: 15 * 60, // 15 minutes
-        stopOnTerminate: false,
-        startOnBoot: true,
-      });
+      if (this.backgroundTasksRegistered) {
+        return;
+      }
 
-      // Define background upload task
-      // Define background upload task - MOVED TO GLOBAL SCOPE
-      // TaskManager.defineTask(BACKGROUND_UPLOAD_TASK, async () => { ... });
+      const alreadyRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_UPLOAD_TASK);
+      if (!alreadyRegistered) {
+      // Register background fetch task
+        await BackgroundFetch.registerTaskAsync(BACKGROUND_UPLOAD_TASK, {
+          minimumInterval: 15 * 60, // 15 minutes
+          stopOnTerminate: false,
+          startOnBoot: true,
+        });
+      }
+
+      this.backgroundTasksRegistered = true;
 
       console.log('Background tasks registered');
     } catch (error) {
@@ -180,7 +185,7 @@ class BackgroundServiceClass {
   }
 
   private async updateForegroundNotification(config: ForegroundServiceConfig): Promise<void> {
-    if (!this.foregroundServiceActive || this.isExpoGo()) {
+    if (this.isExpoGo()) {
       return;
     }
 
@@ -203,40 +208,6 @@ class BackgroundServiceClass {
       });
     } catch (error) {
       console.error('Failed to update foreground notification:', error);
-    }
-  }
-
-  async startBackgroundTask(): Promise<void> {
-    if (Platform.OS !== 'ios') {
-      return;
-    }
-
-    try {
-      // iOS background task - limited time execution
-      this.backgroundTaskId = await BackgroundFetch.startBackgroundExecutionAsync();
-      console.log('iOS background task started:', this.backgroundTaskId);
-
-      // Set a timer to gracefully handle background time expiration
-      setTimeout(() => {
-        this.stopBackgroundTask();
-      }, 25 * 1000); // Stop after 25 seconds to be safe
-
-    } catch (error) {
-      console.error('Failed to start background task:', error);
-    }
-  }
-
-  async stopBackgroundTask(): Promise<void> {
-    if (!this.backgroundTaskId) {
-      return;
-    }
-
-    try {
-      await BackgroundFetch.finishBackgroundExecutionAsync(this.backgroundTaskId);
-      this.backgroundTaskId = null;
-      console.log('iOS background task stopped');
-    } catch (error) {
-      console.error('Failed to stop background task:', error);
     }
   }
 
@@ -284,12 +255,17 @@ class BackgroundServiceClass {
   }
 
   cleanup(): void {
-    if (this.backgroundTaskId) {
-      this.stopBackgroundTask();
-    }
     if (this.foregroundServiceActive) {
       this.stopForegroundService();
     }
+  }
+
+  isForegroundServiceActive(): boolean {
+    return this.foregroundServiceActive;
+  }
+
+  isBackgroundRecordingGuaranteed(): boolean {
+    return Platform.OS === 'android' && !this.isExpoGo();
   }
 }
 

@@ -16,6 +16,8 @@ export interface UploadQueueItem {
   status: 'pending' | 'uploading' | 'completed' | 'failed';
   progress?: number;
   error?: string;
+  errorCause?: 'auth' | 'network' | 'server' | 'file_missing' | 'unknown';
+  lastAttemptAt?: number;
   retryCount: number;
   metadata: {
     chunkIndex: number;
@@ -134,13 +136,20 @@ class UploadServiceClass {
       // Update status to uploading
       item.status = 'uploading';
       item.progress = 0;
+      item.lastAttemptAt = Date.now();
+      item.error = undefined;
+      item.errorCause = undefined;
       await this.saveQueueToStorage();
       this.notifyQueueUpdate();
+
+      await this.ensureAuthenticated();
 
       // Check if file still exists
       const fileInfo = await FileSystem.getInfoAsync(item.filePath);
       if (!fileInfo.exists) {
-        throw new Error('File no longer exists');
+        const missingFileError = new Error('Local file no longer exists');
+        (missingFileError as any).code = 'FILE_MISSING';
+        throw missingFileError;
       }
 
       // Get upload URL and upload file
@@ -177,13 +186,17 @@ class UploadServiceClass {
 
     } catch (error) {
       console.error('Upload failed:', item.fileName, error);
+      const errorMessage = (error as Error).message || 'Unknown upload failure';
+      const errorCause = this.classifyUploadError(errorMessage, error);
 
       // Handle retry logic
       const settings = await SettingsService.getSettings();
       if (item.retryCount < settings.maxRetryAttempts) {
         item.status = 'pending';
         item.retryCount++;
-        item.error = (error as Error).message;
+        item.error = errorMessage;
+        item.errorCause = errorCause;
+        item.lastAttemptAt = Date.now();
 
         // Schedule retry with exponential backoff
         const delay = this.RETRY_DELAY_BASE * Math.pow(2, item.retryCount - 1);
@@ -196,7 +209,9 @@ class UploadServiceClass {
         console.log(`Scheduled retry ${item.retryCount}/${settings.maxRetryAttempts} for ${item.fileName} in ${delay}ms`);
       } else {
         item.status = 'failed';
-        item.error = (error as Error).message;
+        item.error = errorMessage;
+        item.errorCause = errorCause;
+        item.lastAttemptAt = Date.now();
       }
     } finally {
       await this.saveQueueToStorage();
@@ -329,6 +344,41 @@ class UploadServiceClass {
     // This would need a network info library
     // For now, return true (assume connected)
     return true;
+  }
+
+  private async ensureAuthenticated(): Promise<void> {
+    const deviceInfo = await AuthService.getDeviceInfo();
+    if (deviceInfo.isRegistered) {
+      return;
+    }
+
+    try {
+      await AuthService.registerDevice();
+    } catch (error) {
+      const authError = new Error(`Authentication required before upload: ${(error as Error).message}`);
+      (authError as any).code = 'AUTH_REQUIRED';
+      throw authError;
+    }
+  }
+
+  private classifyUploadError(errorMessage: string, error: unknown): UploadQueueItem['errorCause'] {
+    const code = (error as any)?.code;
+    const normalizedMessage = errorMessage.toLowerCase();
+
+    if (code === 'FILE_MISSING' || normalizedMessage.includes('file no longer exists')) {
+      return 'file_missing';
+    }
+    if (code === 'AUTH_REQUIRED' || normalizedMessage.includes('authentication') || normalizedMessage.includes('token') || normalizedMessage.includes('unauthorized')) {
+      return 'auth';
+    }
+    if (normalizedMessage.includes('network') || normalizedMessage.includes('failed to fetch') || normalizedMessage.includes('xhr')) {
+      return 'network';
+    }
+    if (normalizedMessage.includes('http ') || normalizedMessage.includes('status')) {
+      return 'server';
+    }
+
+    return 'unknown';
   }
 
   // Get upload statistics

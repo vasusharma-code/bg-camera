@@ -189,7 +189,7 @@ class PermissionServiceClass {
             },
             {
               text: 'OK',
-              onPress: resolve,
+              onPress: () => resolve(),
             },
           ]
         );

@@ -5,13 +5,15 @@ export const useAppState = (): AppStateStatus => {
   const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
 
   useEffect(() => {
+    let previousState = AppState.currentState;
     const subscription = AppState.addEventListener('change', (nextAppState) => {
-      console.log('App state changed:', appState, '->', nextAppState);
+      console.log('App state changed:', previousState, '->', nextAppState);
+      previousState = nextAppState;
       setAppState(nextAppState);
     });
 
     return () => subscription?.remove();
-  }, [appState]);
+  }, []);
 
   return appState;
 };
