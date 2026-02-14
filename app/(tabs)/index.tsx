@@ -1,189 +1,137 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   Alert,
   Platform,
-  AppState,
-  AppStateStatus,
 } from 'react-native';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
-import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
+import { Ionicons } from '@expo/vector-icons';
 
 import { CameraService } from '@/src/services/CameraService';
 import { BackgroundService } from '@/src/services/BackgroundService';
 import { PermissionService } from '@/src/services/PermissionService';
 import { useAppState } from '@/src/hooks/useAppState';
-import { RecordingIndicator } from '@/src/components/RecordingIndicator';
 import { CameraControls } from '@/src/components/CameraControls';
 
 export default function RecordingScreen() {
   const [facing, setFacing] = useState<CameraType>('back');
   const [permission, requestPermission] = useCameraPermissions();
   const [isRecording, setIsRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const [isBackgroundReady, setIsBackgroundReady] = useState(false);
-  const [isCameraReady, setIsCameraReady] = useState(false); // Track camera readiness
+  const [isCameraReady, setIsCameraReady] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
-  const recordingTimer = useRef<NodeJS.Timeout | undefined>(undefined);
   const appState = useAppState();
 
+  // ---------- INITIALIZATION ----------
   useEffect(() => {
-    initializeServices();
-    return cleanup;
+    (async () => {
+      try {
+        await PermissionService.requestAllPermissions();
+        await BackgroundService.initialize();
+        await BackgroundService.registerBackgroundTasks();
+      } catch (e) {
+        Alert.alert('Error', 'Failed to initialize services');
+      }
+    })();
+
+    return () => {
+      stopRecording();
+    };
   }, []);
 
+  // ---------- APP STATE ----------
   useEffect(() => {
-    handleAppStateChange(appState);
-  }, [appState]);
+    if (!isRecording) return;
 
-  const initializeServices = async () => {
-    try {
-      // Initialize background service
-      await BackgroundService.initialize();
-      setIsBackgroundReady(true);
-
-      // Request all necessary permissions
-      await PermissionService.requestAllPermissions();
-
-      // Register background tasks
-      await BackgroundService.registerBackgroundTasks();
-    } catch (error) {
-      console.error('Failed to initialize services:', error);
-      Alert.alert('Initialization Error', 'Failed to setup background services');
-    }
-  };
-
-  const handleAppStateChange = async (newState: AppStateStatus) => {
-    // Only handle transitions if we are recording
-    if (isRecording) {
-      if (newState === 'background' || newState === 'inactive') {
-        // App going to background - Ensure background service is active
-        await handleBackgroundTransition();
-      } else if (newState === 'active') {
-        // App coming to foreground
-        await handleForegroundTransition();
-      }
-    }
-  };
-
-  const handleBackgroundTransition = async () => {
-    if (Platform.OS === 'android') {
-      // Android: Ensure foreground service is running to keep process alive
-      // It should have been started when recording began, but we double-check here
-      console.log('App in background, ensuring foreground service is active...');
-      await BackgroundService.startForegroundService({
-        title: 'Surveillance Active',
-        message: 'Recording in background',
+    if (appState === 'background' && Platform.OS === 'android') {
+      BackgroundService.startForegroundService({
+        title: 'Recording Active',
+        message: 'Camera recording in background',
         isRecording: true,
       });
-    } else {
-      // iOS: Limited background time
-      await BackgroundService.startBackgroundTask();
-      console.log('iOS: Recording will stop when background time expires');
     }
-  };
+  }, [appState, isRecording]);
 
-  const handleForegroundTransition = async () => {
-    // Resume camera preview and sync with background recording
-    if (Platform.OS === 'ios') {
-      // On iOS, if we had to stop, we restart.
-      console.log('App in foreground (iOS) - Resuming recording...');
-      // Small delay to ensure camera is ready (though onCameraReady should handle button, 
-      // auto-resume might need a check)
-       if (cameraRef.current) {
-          await startRecording();
-       }
-    }
-  };
-
+  // ---------- RECORDING ----------
   const startRecording = async () => {
     if (!permission?.granted) {
-      Alert.alert('Permission Required', 'Camera permission is required');
+      await requestPermission();
       return;
     }
 
-    // Double check availability
-    if (!isCameraReady || !cameraRef.current) {
-       console.warn('Camera not ready, cannot start recording.');
-       return;
+    if (!cameraRef.current || !isCameraReady) {
+      console.warn('Camera not ready');
+      return;
     }
 
     try {
-      // 1. Start Foreground Service FIRST (Android)
       if (Platform.OS === 'android') {
         await BackgroundService.startForegroundService({
-          title: 'Surveillance Active',
-          message: 'Recording in progress',
+          title: 'Recording Active',
+          message: 'Camera recording in progress',
           isRecording: true,
         });
       }
 
       setIsRecording(true);
-      
-      // 2. Start Camera Recording
+
       await CameraService.startRecording({
-        camera: cameraRef.current!,
+        camera: cameraRef.current,
         facing,
-        onChunkComplete: handleChunkComplete,
-        onError: handleRecordingError,
+        onChunkComplete: CameraService.handleChunkComplete,
+        onError: CameraService.handleError,
       });
-
-      // 3. Start Timer
-      startRecordingTimer();
-
-      console.log('Recording started successfully');
-    } catch (error) {
-      console.error('Failed to start recording:', error);
+    } catch (e) {
       setIsRecording(false);
-      // Stop foreground service if we failed to start
-      if (Platform.OS === 'android') {
-          await BackgroundService.stopForegroundService();
-      }
       Alert.alert('Recording Error', 'Failed to start recording');
     }
   };
-  
-// ... (rest of file)
 
-  const handleBackgroundTransition = async () => {
-    if (Platform.OS === 'android') {
-      // Android: Ensure foreground service is running
-      console.log('App in background, ensuring foreground service is active...');
-      await BackgroundService.startForegroundService({
-        title: 'Surveillance Active',
-        message: 'Recording in background',
-        isRecording: true,
-      });
-    } else {
-      // iOS: Must stop recording to save data before suspension
-      console.log('iOS: App backgrounded, stopping recording to save chunk...');
-      await stopRecording();
-      // Logic to auto-resume on foreground is in handleForegroundTransition
+  const stopRecording = async () => {
+    try {
+      setIsRecording(false);
+      await CameraService.stopRecording();
+
+      if (Platform.OS === 'android') {
+        await BackgroundService.stopForegroundService();
+      }
+    } catch (e) {
+      console.error('Stop recording failed', e);
     }
   };
 
-// ... (rest of file)
+  const toggleCameraFacing = () => {
+    if (isRecording) return;
+    setFacing((prev) => (prev === 'back' ? 'front' : 'back'));
+  };
+
+  // ---------- UI ----------
+  return (
+    <SafeAreaView style={styles.container}>
+      <CameraView
+        ref={cameraRef}
+        style={styles.camera}
+        facing={facing}
+        onCameraReady={() => setIsCameraReady(true)}
+      />
 
       <CameraControls
         isRecording={isRecording}
+        isCameraReady={isCameraReady}
+        facing={facing}
         onStartRecording={startRecording}
         onStopRecording={stopRecording}
         onToggleFacing={toggleCameraFacing}
-        facing={facing}
-        isCameraReady={isCameraReady}
       />
 
       {Platform.OS === 'ios' && isRecording && (
         <View style={styles.iosWarning}>
           <Ionicons name="warning" size={16} color="#FF9500" />
           <Text style={styles.iosWarningText}>
-            iOS: Recording will pause when app is backgrounded
+            iOS pauses recording in background
           </Text>
         </View>
       )}
@@ -191,33 +139,11 @@ export default function RecordingScreen() {
   );
 }
 
+// ---------- STYLES ----------
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
-  },
-  message: {
-    textAlign: 'center',
-    paddingBottom: 10,
-    color: '#FFFFFF',
-    fontSize: 16,
-  },
-  permissionButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginHorizontal: 20,
-  },
-  permissionButtonText: {
-    color: '#FFFFFF',
-    textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  cameraContainer: {
-    flex: 1,
-    marginTop: 10,
+    backgroundColor: '#000',
   },
   camera: {
     flex: 1,
@@ -227,11 +153,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(255, 149, 0, 0.1)',
-    marginHorizontal: 20,
-    marginBottom: 10,
-    borderRadius: 8,
+    backgroundColor: 'rgba(255,149,0,0.1)',
   },
   iosWarningText: {
     color: '#FF9500',

@@ -123,7 +123,24 @@ class CameraServiceClass {
     }
   }
 
-  // ... completeCurrentChunk ...
+  private async completeCurrentChunk(): Promise<void> {
+    if (!this.isRecording || !this.config) {
+      return;
+    }
+
+    try {
+      await this.stopCurrentChunk();
+
+      // Start next chunk if still recording
+      if (this.isRecording) {
+        this.currentChunkIndex++;
+        await this.startNextChunk();
+      }
+    } catch (error) {
+      console.error('Failed to complete chunk:', error);
+      this.config.onError(new Error(`Failed to complete chunk: ${(error as Error).message}`));
+    }
+  }
 
   private async stopCurrentChunk(): Promise<void> {
     if (!this.currentRecording || !this.config) {
