@@ -1,5 +1,16 @@
 # dependencies
 node_modules/
+# Android build / native artifacts
+android/.cxx/
+android/app/.cxx/
+android/build/
+android/app/build/
+
+# NDK / CMake
+*.o
+*.obj
+*.so
+*.a
 
 
 # expo
