@@ -120,7 +120,7 @@ class PermissionServiceClass {
           {
             text: 'Cancel',
             style: 'cancel',
-            onPress: resolve,
+            onPress: () => resolve(),
           },
           {
             text: 'Open Settings',
@@ -157,7 +157,7 @@ class PermissionServiceClass {
             },
             {
               text: 'OK',
-              onPress: resolve,
+              onPress: () => resolve(),
             },
           ]
         );
@@ -200,7 +200,7 @@ class PermissionServiceClass {
   // Check if all critical permissions are granted
   async hasCriticalPermissions(): Promise<boolean> {
     const status = await this.checkPermissionStatus();
-    return status.camera && status.microphone;
+    return status.camera && status.microphone && status.mediaLibrary;
   }
 
   // Request specific permission

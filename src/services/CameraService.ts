@@ -1,6 +1,7 @@
 import { CameraView, CameraType } from 'expo-camera';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
+import * as MediaLibrary from 'expo-media-library';
 
 import { UploadService } from './UploadService';
 import { SettingsService } from './SettingsService';
@@ -87,14 +88,14 @@ class CameraServiceClass {
 
     try {
       const settings = await SettingsService.getSettings();
-      const fileName = this.generateChunkFileName();
-      const filePath = `${FileSystem.documentDirectory}surveillance_chunks/${fileName}`;
+      // Create permanent recording directory
+      const recordingDir = `${FileSystem.documentDirectory}recordings/`;
+      await FileSystem.makeDirectoryAsync(recordingDir, { intermediates: true });
 
-      // Ensure directory exists
-      await FileSystem.makeDirectoryAsync(
-        `${FileSystem.documentDirectory}surveillance_chunks/`,
-        { intermediates: true }
-      );
+      const fileName = this.generateChunkFileName();
+
+      // We still record to cache or temp first typically, but Expo Camera records to cache.
+      // We will let it record to its default (cache) and move it in stopCurrentChunk.
 
       // Configure recording options based on settings
       const recordingOptions = {
@@ -114,7 +115,7 @@ class CameraServiceClass {
       // Set timer for chunk duration
       this.chunkTimer = setTimeout(() => {
         this.completeCurrentChunk();
-      }, settings.chunkDurationMinutes * 60 * 1000);
+      }, settings.chunkDurationMinutes * 60 * 1000) as unknown as NodeJS.Timeout;
 
     } catch (error) {
       console.error('Failed to start chunk recording:', error);
@@ -122,24 +123,7 @@ class CameraServiceClass {
     }
   }
 
-  private async completeCurrentChunk(): Promise<void> {
-    if (!this.isRecording || !this.config) {
-      return;
-    }
-
-    try {
-      await this.stopCurrentChunk();
-
-      // Start next chunk if still recording
-      if (this.isRecording) {
-        this.currentChunkIndex++;
-        await this.startNextChunk();
-      }
-    } catch (error) {
-      console.error('Failed to complete chunk:', error);
-      this.config.onError(new Error(`Failed to complete chunk: ${(error as Error).message}`));
-    }
-  }
+  // ... completeCurrentChunk ...
 
   private async stopCurrentChunk(): Promise<void> {
     if (!this.currentRecording || !this.config) {
@@ -152,25 +136,53 @@ class CameraServiceClass {
       const result = await this.currentRecording;
 
       if (result && result.uri) {
-        // Get file info
-        const fileInfo = await FileSystem.getInfoAsync(result.uri);
+        // 1. Move to Persistent Storage
+        const fileName = this.generateChunkFileName();
+        const permanentDir = `${FileSystem.documentDirectory}recordings/`;
+        const permanentUri = permanentDir + fileName;
+
+        // Ensure dir exists (just in case)
+        await FileSystem.makeDirectoryAsync(permanentDir, { intermediates: true });
+
+        // Move from cache to document directory
+        await FileSystem.moveAsync({
+          from: result.uri,
+          to: permanentUri
+        });
+
+        console.log(`Moved recording to permanent storage: ${permanentUri}`);
+
+        // Get file info of new path
+        const fileInfo = await FileSystem.getInfoAsync(permanentUri);
 
         if (fileInfo.exists) {
+          // 2. Save to Gallery (Local Device) - Optional user convenience
+          try {
+            if (await MediaLibrary.getPermissionsAsync().then(p => p.granted)) {
+              await MediaLibrary.createAssetAsync(permanentUri);
+              console.log('Saved persistent chunk to gallery:', permanentUri);
+            } else {
+              console.warn('Media Library permission not granted, skipping gallery save');
+            }
+          } catch (saveError) {
+            console.error('Failed to save to gallery:', saveError);
+          }
+
           const chunk: VideoChunk = {
-            path: result.uri,
+            path: permanentUri, // Use PERMANENT path for queue
             duration: Date.now() - this.recordingStartTime,
             size: fileInfo.size || 0,
             timestamp: Date.now(),
             chunkIndex: this.currentChunkIndex,
           };
 
-          // Add to upload queue
+          // 3. Add to upload queue
           await UploadService.addToQueue(chunk);
 
           // Notify completion
-          this.config.onChunkComplete(result.uri);
+          this.config.onChunkComplete(permanentUri);
 
-          console.log(`Chunk completed: ${result.uri}, Size: ${chunk.size} bytes`);
+          console.log(`Chunk completed: ${permanentUri}, Size: ${chunk.size} bytes`);
         }
       }
 
@@ -184,7 +196,8 @@ class CameraServiceClass {
   private generateChunkFileName(): string {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const deviceId = this.getDeviceId();
-    return `surveillance_${deviceId}_${timestamp}_chunk${this.currentChunkIndex}.${Platform.OS === 'ios' ? 'mov' : 'mp4'}`;
+    // Ensure unique filename
+    return `rec_${deviceId}_${timestamp}_${this.currentChunkIndex}.${Platform.OS === 'ios' ? 'mov' : 'mp4'}`;
   }
 
   private getDeviceId(): string {

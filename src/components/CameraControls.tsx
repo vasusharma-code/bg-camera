@@ -9,6 +9,7 @@ interface CameraControlsProps {
   onStopRecording: () => void;
   onToggleFacing: () => void;
   facing: CameraType;
+  isCameraReady: boolean;
 }
 
 export const CameraControls: React.FC<CameraControlsProps> = ({
@@ -17,6 +18,7 @@ export const CameraControls: React.FC<CameraControlsProps> = ({
   onStopRecording,
   onToggleFacing,
   facing,
+  isCameraReady,
 }) => {
   return (
     <View style={styles.container}>
@@ -38,14 +40,17 @@ export const CameraControls: React.FC<CameraControlsProps> = ({
         style={[
           styles.recordButton,
           isRecording && styles.recordButtonActive,
+          !isCameraReady && styles.recordButtonDisabled,
         ]}
         onPress={isRecording ? onStopRecording : onStartRecording}
         activeOpacity={0.8}
+        disabled={!isCameraReady}
       >
         <View
           style={[
             styles.recordButtonInner,
             isRecording && styles.recordButtonInnerActive,
+            !isCameraReady && styles.recordButtonInnerDisabled,
           ]}
         />
       </TouchableOpacity>
@@ -97,6 +102,10 @@ const styles = StyleSheet.create({
   recordButtonActive: {
     borderColor: '#FF3B30',
   },
+  recordButtonDisabled: {
+    opacity: 0.5,
+    borderColor: '#999',
+  },
   recordButtonInner: {
     width: 60,
     height: 60,
@@ -107,5 +116,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     width: 30,
     height: 30,
+  },
+  recordButtonInnerDisabled: {
+    backgroundColor: '#999',
   },
 });
