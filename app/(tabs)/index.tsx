@@ -7,12 +7,17 @@ import {
   Platform,
 } from 'react-native';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as MediaLibrary from 'expo-media-library';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { CameraService } from '@/src/services/CameraService';
+import { CameraXNativeService } from '@/src/services/CameraXNativeService';
 import { BackgroundService } from '@/src/services/BackgroundService';
 import { PermissionService } from '@/src/services/PermissionService';
+import { UploadService } from '@/src/services/UploadService';
+import { SettingsService } from '@/src/services/SettingsService';
 import { useAppState } from '@/src/hooks/useAppState';
 import { CameraControls } from '@/src/components/CameraControls';
 import { RecordingIndicator } from '@/src/components/RecordingIndicator';
@@ -30,7 +35,11 @@ export default function RecordingScreen() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startingRef = useRef(false);
   const stoppingRef = useRef(false);
+  const desiredRecordingRef = useRef(false);
+  const restartScheduledRef = useRef(false);
+  const recordingStartMsRef = useRef(0);
   const appState = useAppState();
+  const useNativeAndroidRecorder = Platform.OS === 'android' && CameraXNativeService.isAvailable();
 
   // ---------- INITIALIZATION ----------
   useEffect(() => {
@@ -93,6 +102,16 @@ export default function RecordingScreen() {
     }
   }, [appState, isRecording]);
 
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+
+    if (appState === 'active') {
+      void attemptResumeRecordingIfNeeded();
+    }
+  }, [appState, isCameraReady, permission?.granted]);
+
   const handleChunkComplete = (chunkPath: string) => {
     setLastChunkPath(chunkPath);
     console.log('Chunk completed and persisted locally:', chunkPath);
@@ -100,14 +119,43 @@ export default function RecordingScreen() {
 
   const handleRecordingError = (error: Error) => {
     console.error('Recording error callback:', error);
-    Alert.alert('Recording Error', error.message);
+    if (appState === 'active') {
+      Alert.alert('Recording Error', error.message);
+    }
     setIsRecording(false);
-    CameraService.stopRecording().catch(console.error);
+    if (useNativeAndroidRecorder) {
+      CameraXNativeService.stopRecording().catch(console.error);
+    } else {
+      CameraService.stopRecording().catch(console.error);
+    }
     BackgroundService.stopForegroundService().catch(console.error);
   };
 
-  // ---------- RECORDING ----------
-  const startRecording = async () => {
+  const attemptResumeRecordingIfNeeded = async () => {
+    if (!desiredRecordingRef.current || isRecording || restartScheduledRef.current) {
+      return;
+    }
+
+    if (!permission?.granted) {
+      return;
+    }
+
+    if (!useNativeAndroidRecorder && (!isCameraReady || !cameraRef.current)) {
+      return;
+    }
+
+    restartScheduledRef.current = true;
+    try {
+      await startRecordingInternal();
+      console.log('Recording resumed after interruption');
+    } catch (error) {
+      console.error('Failed to resume interrupted recording:', error);
+    } finally {
+      restartScheduledRef.current = false;
+    }
+  };
+
+  const startRecordingInternal = async () => {
     if (startingRef.current || isRecording) {
       return;
     }
@@ -121,7 +169,7 @@ export default function RecordingScreen() {
       }
     }
 
-    if (!cameraRef.current || !isCameraReady) {
+    if (!useNativeAndroidRecorder && (!cameraRef.current || !isCameraReady)) {
       console.warn('Camera not ready');
       startingRef.current = false;
       return;
@@ -138,25 +186,47 @@ export default function RecordingScreen() {
 
       setIsRecording(true);
       setRecordingTimeSeconds(0);
+      recordingStartMsRef.current = Date.now();
 
-      await CameraService.startRecording({
-        camera: cameraRef.current,
-        facing,
-        onChunkComplete: handleChunkComplete,
-        onError: handleRecordingError,
-      });
+      if (useNativeAndroidRecorder) {
+        const settings = await SettingsService.getSettings();
+        await CameraXNativeService.startRecording({
+          quality: settings.videoQuality,
+          recordAudio: settings.recordAudio,
+        });
+      } else {
+        await CameraService.startRecording({
+          camera: cameraRef.current!,
+          facing,
+          onChunkComplete: handleChunkComplete,
+          onError: handleRecordingError,
+        });
+      }
     } catch (e) {
       setIsRecording(false);
-      Alert.alert('Recording Error', 'Failed to start recording');
       if (Platform.OS === 'android') {
         await BackgroundService.stopForegroundService();
       }
+      throw e;
     } finally {
       startingRef.current = false;
     }
   };
 
+  // ---------- RECORDING ----------
+  const startRecording = async () => {
+    desiredRecordingRef.current = true;
+    try {
+      await startRecordingInternal();
+    } catch (e) {
+      Alert.alert('Recording Error', 'Failed to start recording');
+      desiredRecordingRef.current = false;
+    }
+  };
+
   const stopRecording = async () => {
+    desiredRecordingRef.current = false;
+
     if (stoppingRef.current) {
       return;
     }
@@ -164,7 +234,13 @@ export default function RecordingScreen() {
 
     try {
       setIsRecording(false);
-      await CameraService.stopRecording();
+
+      if (useNativeAndroidRecorder) {
+        const nativePath = await CameraXNativeService.stopRecording();
+        await handleNativeRecordingComplete(nativePath);
+      } else {
+        await CameraService.stopRecording();
+      }
 
       if (Platform.OS === 'android') {
         await BackgroundService.stopForegroundService();
@@ -174,6 +250,37 @@ export default function RecordingScreen() {
     } finally {
       stoppingRef.current = false;
     }
+  };
+
+  const handleNativeRecordingComplete = async (nativePath: string) => {
+    const normalizedPath = nativePath.startsWith('file://')
+      ? nativePath
+      : `file://${nativePath.replace(/\\/g, '/')}`;
+
+    const fileInfo = await FileSystem.getInfoAsync(normalizedPath);
+    if (!fileInfo.exists || typeof (fileInfo as any).size !== 'number') {
+      throw new Error('Native recording output file not found');
+    }
+
+    setLastChunkPath(normalizedPath);
+
+    try {
+      const mediaPermission = await MediaLibrary.getPermissionsAsync();
+      if (mediaPermission.granted) {
+        await MediaLibrary.createAssetAsync(normalizedPath);
+      }
+    } catch (e) {
+      console.warn('Gallery save failed for native recording:', e);
+    }
+
+    const duration = Date.now() - recordingStartMsRef.current;
+    await UploadService.addToQueue({
+      path: normalizedPath,
+      duration: Math.max(duration, 0),
+      size: (fileInfo as any).size || 0,
+      timestamp: Date.now(),
+      chunkIndex: 0,
+    });
   };
 
   const toggleCameraFacing = () => {
@@ -190,16 +297,22 @@ export default function RecordingScreen() {
         isBackgroundReady={isBackgroundReady}
       />
 
-      <CameraView
-        ref={cameraRef}
-        style={styles.camera}
-        facing={facing}
-        onCameraReady={() => setIsCameraReady(true)}
-      />
+      {!useNativeAndroidRecorder || !isRecording ? (
+        <CameraView
+          ref={cameraRef}
+          style={styles.camera}
+          facing={facing}
+          onCameraReady={() => setIsCameraReady(true)}
+        />
+      ) : (
+        <View style={styles.cameraPlaceholder}>
+          <Text style={styles.cameraPlaceholderText}>CameraX background recorder active</Text>
+        </View>
+      )}
 
       <CameraControls
         isRecording={isRecording}
-        isCameraReady={isCameraReady}
+        isCameraReady={useNativeAndroidRecorder ? true : isCameraReady}
         facing={facing}
         onStartRecording={startRecording}
         onStopRecording={stopRecording}
@@ -243,6 +356,16 @@ const styles = StyleSheet.create({
   },
   camera: {
     flex: 1,
+  },
+  cameraPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000',
+  },
+  cameraPlaceholderText: {
+    color: '#FFFFFF',
+    fontSize: 14,
   },
   iosWarning: {
     flexDirection: 'row',

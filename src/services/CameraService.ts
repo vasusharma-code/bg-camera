@@ -32,6 +32,8 @@ class CameraServiceClass {
   private currentChunkFileName: string | null = null;
   private stableDeviceId: string | null = null;
   private config: RecordingConfig | null = null;
+  private readonly FILE_STABILIZE_MAX_RETRIES = 12;
+  private readonly FILE_STABILIZE_RETRY_MS = 250;
 
   async startRecording(config: RecordingConfig): Promise<void> {
     if (this.isRecording) {
@@ -165,25 +167,13 @@ class CameraServiceClass {
 
       const permanentUri = `${RECORDINGS_DIR}${currentChunkFileName}`;
       await FileSystem.makeDirectoryAsync(RECORDINGS_DIR, { intermediates: true });
-      await FileSystem.moveAsync({
-        from: result.uri,
-        to: permanentUri,
-      });
+      await this.persistToPermanentStorage(result.uri, permanentUri);
 
       console.log(`Moved recording to permanent storage: ${permanentUri}`);
-      const fileInfo = await FileSystem.getInfoAsync(permanentUri);
-
-      if (!fileInfo.exists || !fileInfo.size) {
-        throw new Error('Recorded file was not persisted correctly');
-      }
+      const fileInfo = await this.waitForStableFile(permanentUri);
 
       try {
-        if (await MediaLibrary.getPermissionsAsync().then((p) => p.granted)) {
-          await MediaLibrary.createAssetAsync(permanentUri);
-          console.log('Saved persistent chunk to gallery:', permanentUri);
-        } else {
-          console.warn('Media Library permission not granted, skipping gallery save');
-        }
+        await this.saveToGallery(permanentUri);
       } catch (saveError) {
         console.error('Failed to save to gallery:', saveError);
       }
@@ -191,7 +181,7 @@ class CameraServiceClass {
       const chunk: VideoChunk = {
         path: permanentUri,
         duration: Date.now() - chunkStartTime,
-        size: fileInfo.size || 0,
+        size: fileInfo.size,
         timestamp: Date.now(),
         chunkIndex: this.currentChunkIndex,
       };
@@ -225,6 +215,70 @@ class CameraServiceClass {
     }
 
     return this.stableDeviceId;
+  }
+
+  private async persistToPermanentStorage(sourceUri: string, destinationUri: string): Promise<void> {
+    try {
+      await FileSystem.moveAsync({
+        from: sourceUri,
+        to: destinationUri,
+      });
+      return;
+    } catch (moveError) {
+      console.warn('Move failed, falling back to copy:', moveError);
+    }
+
+    await FileSystem.copyAsync({
+      from: sourceUri,
+      to: destinationUri,
+    });
+  }
+
+  private async waitForStableFile(fileUri: string): Promise<{ size: number }> {
+    let lastInfo: FileSystem.FileInfo | null = null;
+
+    for (let i = 0; i < this.FILE_STABILIZE_MAX_RETRIES; i++) {
+      const info = await FileSystem.getInfoAsync(fileUri);
+      lastInfo = info;
+      const size = (info as { size?: number }).size;
+      if (info.exists && typeof size === 'number' && size >= 0) {
+        return { size };
+      }
+
+      await this.delay(this.FILE_STABILIZE_RETRY_MS);
+    }
+
+    throw new Error(`Recorded file was not persisted correctly: ${JSON.stringify(lastInfo)}`);
+  }
+
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async saveToGallery(fileUri: string): Promise<void> {
+    let permission = await MediaLibrary.getPermissionsAsync();
+
+    if (!permission.granted) {
+      permission = await MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']);
+    }
+
+    if (!permission.granted) {
+      console.warn('Media Library permission not granted, skipping gallery save');
+      return;
+    }
+
+    try {
+      const asset = await MediaLibrary.createAssetAsync(fileUri);
+      try {
+        await MediaLibrary.createAlbumAsync('Bg Camera', asset, false);
+      } catch {
+        // Album may already exist.
+      }
+      console.log('Saved persistent chunk to gallery:', fileUri);
+    } catch (error) {
+      await MediaLibrary.saveToLibraryAsync(fileUri);
+      console.log('Saved to gallery with fallback API:', fileUri, error);
+    }
   }
 
   private getVideoQualityConfig(quality: string) {

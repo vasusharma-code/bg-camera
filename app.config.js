@@ -32,6 +32,8 @@ export default {
         'READ_MEDIA_VIDEO',
         'READ_MEDIA_IMAGES',
         'FOREGROUND_SERVICE',
+        'FOREGROUND_SERVICE_CAMERA',
+        'FOREGROUND_SERVICE_MICROPHONE',
         'WAKE_LOCK',
         'RECEIVE_BOOT_COMPLETED',
         'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'
@@ -50,6 +52,7 @@ export default {
       'expo-router',
       'expo-font',
       'expo-camera',
+      'expo-notifications',
       [
         'expo-task-manager',
         {

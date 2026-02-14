@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 const API_BASE_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:3000';
 
@@ -44,6 +45,15 @@ class APIServiceClass {
   constructor() {
     this.baseURL = API_BASE_URL;
     console.log('API Service initialized with base URL:', this.baseURL);
+
+    if (
+      Platform.OS !== 'web' &&
+      (this.baseURL.includes('localhost') || this.baseURL.includes('127.0.0.1'))
+    ) {
+      console.warn(
+        'API base URL points to localhost. Physical devices cannot reach localhost on your computer; set EXPO_PUBLIC_API_URL to your LAN IP.'
+      );
+    }
   }
 
   private async makeRequest<T>(
